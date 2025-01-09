@@ -204,7 +204,7 @@ class CodeFeedbackPage extends StatefulWidget {
 }
 
 class _CodeFeedbackPageState extends State<CodeFeedbackPage> {
-  final TextEditingController _codeController = TextEditingController();
+  final TextEditingController _questionController = TextEditingController();
   String _aiFeedback = '';
   bool _isLoading = false;
   List<Map<String, dynamic>> _feedbackHistory = [];
@@ -233,7 +233,7 @@ class _CodeFeedbackPageState extends State<CodeFeedbackPage> {
         _feedbackHistory = snapshot.docs
             .map((doc) => {
           'id': doc.id,
-          'code': doc.data()['code'] as String,
+          'question': doc.data()['question'] as String,
           'feedback': doc.data()['feedback'] as String,
           'timestamp': doc.data()['timestamp'] as Timestamp,
         })
@@ -259,14 +259,13 @@ class _CodeFeedbackPageState extends State<CodeFeedbackPage> {
   }
 
   Future<void> _getAiFeedback() async {
-    // 이미 요청 중이면 취소
     if (_isLoading) {
       _cancelRequest();
       return;
     }
 
-    if (_codeController.text.isEmpty) {
-      _showError('Please enter some code first');
+    if (_questionController.text.isEmpty) {
+      _showError('Please enter your question first');
       return;
     }
 
@@ -280,13 +279,11 @@ class _CodeFeedbackPageState extends State<CodeFeedbackPage> {
 
       final idToken = await user.getIdToken();
 
-      // API 요청 데이터 준비
       final requestBody = {
-        'subject': _codeController.text,
+        'question': _questionController.text,
         'auth': {'uid': user.uid, 'email_verified': true}
       };
 
-      // 새로운 client 인스턴스 생성
       _client = http.Client();
 
       final response = await _client!.post(
@@ -304,16 +301,14 @@ class _CodeFeedbackPageState extends State<CodeFeedbackPage> {
       if (response.statusCode == 200) {
         String responseBody = response.body.trim();
 
-        // 응답이 직접적인 문자열인 경우 처리
         if (!responseBody.startsWith('{') && !responseBody.startsWith('[')) {
           setState(() {
             _aiFeedback = responseBody;
           });
-          await _saveFeedback(_codeController.text, responseBody);
+          await _saveFeedback(_questionController.text, responseBody);
           return;
         }
 
-        // JSON 응답 처리
         try {
           final jsonResponse = json.decode(responseBody);
           final feedback = jsonResponse['result'] ??
@@ -324,7 +319,7 @@ class _CodeFeedbackPageState extends State<CodeFeedbackPage> {
           setState(() {
             _aiFeedback = feedback.toString();
           });
-          await _saveFeedback(_codeController.text, feedback.toString());
+          await _saveFeedback(_questionController.text, feedback.toString());
         } catch (e) {
           debugPrint('JSON parse error: $e');
           debugPrint('Response body: $responseBody');
@@ -332,7 +327,7 @@ class _CodeFeedbackPageState extends State<CodeFeedbackPage> {
           setState(() {
             _aiFeedback = responseBody;
           });
-          await _saveFeedback(_codeController.text, responseBody);
+          await _saveFeedback(_questionController.text, responseBody);
         }
       } else {
         _showError('Failed to get AI feedback. Status: ${response.statusCode}');
@@ -352,13 +347,12 @@ class _CodeFeedbackPageState extends State<CodeFeedbackPage> {
           _isLoading = false;
         });
       }
-      // client 정리
       _client?.close();
       _client = null;
     }
   }
 
-  Future<void> _saveFeedback(String code, String feedback) async {
+  Future<void> _saveFeedback(String question, String feedback) async {
     try {
       final user = FirebaseAuth.instance.currentUser;
       if (user == null) {
@@ -368,7 +362,7 @@ class _CodeFeedbackPageState extends State<CodeFeedbackPage> {
 
       await FirebaseFirestore.instance.collection(FEEDBACK_COLLECTION).add({
         'userId': user.uid,
-        'code': code,
+        'question': question,
         'feedback': feedback,
         'timestamp': FieldValue.serverTimestamp(),
       });
@@ -392,6 +386,18 @@ class _CodeFeedbackPageState extends State<CodeFeedbackPage> {
       appBar: AppBar(
         backgroundColor: Theme.of(context).colorScheme.inversePrimary,
         title: Text(widget.title),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.logout),
+            onPressed: () async {
+              await FirebaseAuth.instance.signOut();
+              if (!mounted) return;
+              Navigator.of(context).pushReplacement(
+                MaterialPageRoute(builder: (context) => const AuthPage()),
+              );
+            },
+          ),
+        ],
       ),
       body: Padding(
         padding: const EdgeInsets.all(16.0),
@@ -399,12 +405,12 @@ class _CodeFeedbackPageState extends State<CodeFeedbackPage> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             TextField(
-              controller: _codeController,
-              maxLines: 10,
+              controller: _questionController,
+              maxLines: 3,
               decoration: const InputDecoration(
                 border: OutlineInputBorder(),
-                labelText: 'Enter your Flutter code',
-                hintText: 'Paste your code here...',
+                labelText: 'Enter your question',
+                hintText: 'Type your question here...',
               ),
             ),
             const SizedBox(height: 16),
@@ -422,33 +428,28 @@ class _CodeFeedbackPageState extends State<CodeFeedbackPage> {
                     ),
                   ),
                   const SizedBox(width: 8),
-                  Text(_isLoading ? 'Cancel' : 'Get AI Feedback'),
+                  Text(_isLoading ? 'Cancel' : 'Get Answer'),
                 ],
               )
-                  : const Text('Get AI Feedback'),
+                  : const Text('Get Answer'),
             ),
             if (_aiFeedback.isNotEmpty) ...[
               const SizedBox(height: 16),
-              const Text('AI Feedback:',
-                  style: TextStyle(fontWeight: FontWeight.bold)),
-              Expanded(
-                child: SingleChildScrollView(
-                  child: Container(
-                    padding: const EdgeInsets.all(8.0),
-                    decoration: BoxDecoration(
-                      border: Border.all(color: Colors.grey.shade300),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: SelectableText(
-                      _aiFeedback,
-                      style: Theme.of(context).textTheme.bodyMedium,
-                    ),
-                  ),
+              const Text('Answer:', style: TextStyle(fontWeight: FontWeight.bold)),
+              Container(
+                padding: const EdgeInsets.all(8.0),
+                decoration: BoxDecoration(
+                  border: Border.all(color: Colors.grey.shade300),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: SelectableText(
+                  _aiFeedback,
+                  style: Theme.of(context).textTheme.bodyMedium,
                 ),
               ),
               const Divider(),
             ],
-            const Text('Feedback History:',
+            const Text('Question History:',
                 style: TextStyle(fontWeight: FontWeight.bold)),
             Expanded(
               child: ListView.builder(
@@ -457,15 +458,21 @@ class _CodeFeedbackPageState extends State<CodeFeedbackPage> {
                   final feedback = _feedbackHistory[index];
                   return Card(
                     child: ExpansionTile(
-                      title: Text('Feedback ${index + 1}'),
-                      subtitle: Text('Time: ${feedback['timestamp'].toDate()}'),
+                      title: Text(
+                        feedback['question'].toString().length > 50
+                            ? '${feedback['question'].toString().substring(0, 50)}...'
+                            : feedback['question'].toString(),
+                      ),
+                      subtitle: Text(
+                        'Asked on: ${feedback['timestamp'].toDate().toString().split('.')[0]}',
+                      ),
                       children: [
                         Padding(
                           padding: const EdgeInsets.all(16.0),
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              const Text('Code:',
+                              const Text('Full Question:',
                                   style: TextStyle(fontWeight: FontWeight.bold)),
                               Container(
                                 width: double.infinity,
@@ -475,12 +482,12 @@ class _CodeFeedbackPageState extends State<CodeFeedbackPage> {
                                   borderRadius: BorderRadius.circular(4),
                                 ),
                                 child: SelectableText(
-                                  feedback['code'],
+                                  feedback['question'],
                                   style: Theme.of(context).textTheme.bodySmall,
                                 ),
                               ),
                               const SizedBox(height: 8),
-                              const Text('Feedback:',
+                              const Text('Answer:',
                                   style: TextStyle(fontWeight: FontWeight.bold)),
                               Container(
                                 width: double.infinity,
@@ -511,7 +518,7 @@ class _CodeFeedbackPageState extends State<CodeFeedbackPage> {
 
   @override
   void dispose() {
-    _codeController.dispose();
+    _questionController.dispose();
     _client?.close();
     super.dispose();
   }
