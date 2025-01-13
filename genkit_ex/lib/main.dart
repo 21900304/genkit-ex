@@ -376,11 +376,11 @@ class _CodeFeedbackPageState extends State<CodeFeedbackPage> {
       );*/
 
       final functionUrl = useEmulator
-          ? 'http://$emulatorHost:5001/emulators-ex/us-central1/aiCodeFeedback'
+          ? 'http://127.0.0.1:5001/emulators-ex/us-central1/aiCodeFeedback'//'http://$emulatorHost:5001/emulators-ex/us-central1/aiCodeFeedback'
           : 'https://aicodefeedback-rm7c4usaqa-uc.a.run.app';
 
       final response = await _client!.post(
-        Uri.parse('https://aicodefeedback-rm7c4usaqa-uc.a.run.app'),
+        Uri.parse(functionUrl),
         headers: {
           'Content-Type': 'application/json',
           'Authorization': 'Bearer $idToken',
