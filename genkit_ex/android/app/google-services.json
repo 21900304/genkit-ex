@@ -1,21 +1,22 @@
 {
   "project_info": {
-    "project_number": "589120315630",
-    "project_id": "genkit-ex",
-    "storage_bucket": "genkit-ex.firebasestorage.app"
+    "project_number": "12376997928",
+    "firebase_url": "https://emulators-ex-default-rtdb.firebaseio.com",
+    "project_id": "emulators-ex",
+    "storage_bucket": "emulators-ex.firebasestorage.app"
   },
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:589120315630:android:3cd8df022611accc7193ff",
+        "mobilesdk_app_id": "1:12376997928:android:177281afa9b84a853b751d",
         "android_client_info": {
-          "package_name": "com.genkit.app"
+          "package_name": "com.emulators.app"
         }
       },
       "oauth_client": [],
       "api_key": [
         {
-          "current_key": "AIzaSyDO7w5rp0nBqghOR0mhG6k5AK0g_JtYn3o"
+          "current_key": "AIzaSyC0NlB7H-yq17z4mrGU-AkqyE3PO659oow"
         }
       ],
       "services": {

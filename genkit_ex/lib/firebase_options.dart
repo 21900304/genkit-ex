@@ -41,48 +41,52 @@ class DefaultFirebaseOptions {
   }
 
   static const FirebaseOptions web = FirebaseOptions(
-    apiKey: 'AIzaSyCx7hvDFerM6NZgHqBfvuJ_0uJlfGG_L24',
-    appId: '1:589120315630:web:b2c1a660e1e879137193ff',
-    messagingSenderId: '589120315630',
-    projectId: 'genkit-ex',
-    authDomain: 'genkit-ex.firebaseapp.com',
-    storageBucket: 'genkit-ex.firebasestorage.app',
-    measurementId: 'G-4N98RXSE5Q',
+    apiKey: 'AIzaSyDc6IoTlSIm193KR9pDW0oG1Eoyvf0UAIc',
+    appId: '1:12376997928:web:d3c3498f89279b0b3b751d',
+    messagingSenderId: '12376997928',
+    projectId: 'emulators-ex',
+    authDomain: 'emulators-ex.firebaseapp.com',
+    databaseURL: 'https://emulators-ex-default-rtdb.firebaseio.com',
+    storageBucket: 'emulators-ex.firebasestorage.app',
   );
 
   static const FirebaseOptions android = FirebaseOptions(
-    apiKey: 'AIzaSyDO7w5rp0nBqghOR0mhG6k5AK0g_JtYn3o',
-    appId: '1:589120315630:android:3cd8df022611accc7193ff',
-    messagingSenderId: '589120315630',
-    projectId: 'genkit-ex',
-    storageBucket: 'genkit-ex.firebasestorage.app',
+    apiKey: 'AIzaSyC0NlB7H-yq17z4mrGU-AkqyE3PO659oow',
+    appId: '1:12376997928:android:177281afa9b84a853b751d',
+    messagingSenderId: '12376997928',
+    projectId: 'emulators-ex',
+    databaseURL: 'https://emulators-ex-default-rtdb.firebaseio.com',
+    storageBucket: 'emulators-ex.firebasestorage.app',
   );
 
   static const FirebaseOptions ios = FirebaseOptions(
-    apiKey: 'AIzaSyASVbxcNIH5lEtPI12uONR-Hmyc_4mbwn4',
-    appId: '1:589120315630:ios:cc2b92236c51597c7193ff',
-    messagingSenderId: '589120315630',
-    projectId: 'genkit-ex',
-    storageBucket: 'genkit-ex.firebasestorage.app',
+    apiKey: 'AIzaSyBpz90FaZkhezuze-SNUzHXYlrZQog8Mbk',
+    appId: '1:12376997928:ios:297d1b09f90794193b751d',
+    messagingSenderId: '12376997928',
+    projectId: 'emulators-ex',
+    databaseURL: 'https://emulators-ex-default-rtdb.firebaseio.com',
+    storageBucket: 'emulators-ex.firebasestorage.app',
     iosBundleId: 'com.example.genkitEx',
   );
 
   static const FirebaseOptions macos = FirebaseOptions(
-    apiKey: 'AIzaSyASVbxcNIH5lEtPI12uONR-Hmyc_4mbwn4',
-    appId: '1:589120315630:ios:cc2b92236c51597c7193ff',
-    messagingSenderId: '589120315630',
-    projectId: 'genkit-ex',
-    storageBucket: 'genkit-ex.firebasestorage.app',
+    apiKey: 'AIzaSyBpz90FaZkhezuze-SNUzHXYlrZQog8Mbk',
+    appId: '1:12376997928:ios:297d1b09f90794193b751d',
+    messagingSenderId: '12376997928',
+    projectId: 'emulators-ex',
+    databaseURL: 'https://emulators-ex-default-rtdb.firebaseio.com',
+    storageBucket: 'emulators-ex.firebasestorage.app',
     iosBundleId: 'com.example.genkitEx',
   );
 
   static const FirebaseOptions windows = FirebaseOptions(
-    apiKey: 'AIzaSyCx7hvDFerM6NZgHqBfvuJ_0uJlfGG_L24',
-    appId: '1:589120315630:web:bb5c394ffaa01e1d7193ff',
-    messagingSenderId: '589120315630',
-    projectId: 'genkit-ex',
-    authDomain: 'genkit-ex.firebaseapp.com',
-    storageBucket: 'genkit-ex.firebasestorage.app',
-    measurementId: 'G-6YSGWC64GP',
+    apiKey: 'AIzaSyDc6IoTlSIm193KR9pDW0oG1Eoyvf0UAIc',
+    appId: '1:12376997928:web:483219d125d6e3ff3b751d',
+    messagingSenderId: '12376997928',
+    projectId: 'emulators-ex',
+    authDomain: 'emulators-ex.firebaseapp.com',
+    databaseURL: 'https://emulators-ex-default-rtdb.firebaseio.com',
+    storageBucket: 'emulators-ex.firebasestorage.app',
   );
+
 }

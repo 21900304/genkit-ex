@@ -1,5 +1,7 @@
+import 'dart:io';
 import 'dart:math';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -10,13 +12,66 @@ import 'dart:convert';
 
 const String FEEDBACK_COLLECTION = 'code_feedback';
 
+//flutter run --dart-define=USE_FIREBASE_EMULATOR=true
+
+// Emulator 호스트 설정
+const bool useEmulator = bool.fromEnvironment('USE_FIREBASE_EMULATOR', defaultValue: false);
+const String androidEmulatorHost = '10.0.2.2';
+const String iOSEmulatorHost = 'localhost';
+const String emulatorHost = androidEmulatorHost; // 또는 iOSEmulatorHost
+
+final host = kIsWeb ? 'localhost' : (Platform.isAndroid ? '10.0.2.2' : 'localhost');
+
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform,
   );
+
+  if (useEmulator) {
+    try {
+      // Auth Emulator 연결 시도 전 로그 추가
+      if (kDebugMode) {
+        print('Connecting to Auth Emulator at $host:9099');
+      }
+
+      // Auth Emulator 연결
+      await FirebaseAuth.instance.useAuthEmulator(host, 9099);
+
+      // Firestore Emulator 연결
+      FirebaseFirestore.instance.settings = Settings(
+        host: '$host:8080',
+        sslEnabled: false,
+        persistenceEnabled: false,
+      );
+
+      if (kDebugMode) {
+        print('Successfully connected to Firebase Emulators');
+      }
+    } catch (e) {
+      if (kDebugMode) {
+        print('Failed to connect to emulators: $e');
+      }
+    }
+  }
+
   runApp(const MyApp());
 }
+
+Future<void> _connectToEmulator() async {
+  FirebaseFirestore.instance.settings = Settings(
+    host: '$emulatorHost:8080',
+    sslEnabled: false,
+    persistenceEnabled: false,
+  );
+
+  await FirebaseAuth.instance.useAuthEmulator(emulatorHost, 9099);
+
+  if (kDebugMode) {
+    print('Connected to Firebase Emulator');
+  }
+}
+
 
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
@@ -72,10 +127,16 @@ class _AuthPageState extends State<AuthPage> {
 
     try {
       if (_isLogin) {
+        if (kDebugMode) {
+          print('Attempting login with email: ${_emailController.text}');
+        }
         final credential = await FirebaseAuth.instance.signInWithEmailAndPassword(
           email: _emailController.text.trim(),
           password: _passwordController.text.trim(),
         );
+        if (kDebugMode) {
+          print('Login successful: ${credential.user?.uid}');
+        }
 
         if (!credential.user!.emailVerified) {
           await FirebaseAuth.instance.signOut();
@@ -99,9 +160,11 @@ class _AuthPageState extends State<AuthPage> {
         _showMessage('Verification email sent. Please check your inbox.');
       }
     } on FirebaseAuthException catch (e) {
+      if (kDebugMode) {
+        print('Auth error: ${e.code} - ${e.message}');
+      }
+      print("${e.code}");
       _showError(_getErrorMessage(e.code));
-    } finally {
-      if (mounted) setState(() => _isLoading = false);
     }
   }
 
@@ -161,6 +224,16 @@ class _AuthPageState extends State<AuthPage> {
                 border: OutlineInputBorder(),
               ),
               keyboardType: TextInputType.emailAddress,
+              onTap: () {
+                if (kIsWeb) {
+                  _emailController.selection = TextSelection.fromPosition(
+                    TextPosition(offset: _emailController.text.length),
+                  );
+                }
+              },
+              onTapOutside: (event) {
+                FocusScope.of(context).unfocus();
+              },
             ),
             const SizedBox(height: 16),
             TextField(
@@ -242,6 +315,7 @@ class _CodeFeedbackPageState extends State<CodeFeedbackPage> {
     } catch (e) {
       if (!mounted) return;
       _showError('Error loading feedback history: $e');
+      print("Load Data Error : $e");
     }
   }
 
@@ -255,6 +329,7 @@ class _CodeFeedbackPageState extends State<CodeFeedbackPage> {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Request cancelled')),
       );
+      print("Request cancelled");
     }
   }
 
@@ -286,8 +361,26 @@ class _CodeFeedbackPageState extends State<CodeFeedbackPage> {
 
       _client = http.Client();
 
+      /*final functionUrl = const bool.fromEnvironment('USE_FIREBASE_EMULATOR', defaultValue: false)
+          ? 'http://10.0.2.2:5001/your-project-id/us-central1/yourFunctionName'  // 에뮬레이터 URL
+          : 'https://aicodefeedback-rm7c4usaqa-uc.a.run.app';
+
       final response = await _client!.post(
-        Uri.parse('https://aicodefeedback-mu5egjfopa-uc.a.run.app'),
+          Uri.parse('https://aicodefeedback-rm7c4usaqa-uc.a.run.app'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $idToken',
+          'Accept': 'application/json',
+        },
+        body: json.encode(requestBody),
+      );*/
+
+      final functionUrl = useEmulator
+          ? 'http://$emulatorHost:5001/emulators-ex/us-central1/aiCodeFeedback'
+          : 'https://aicodefeedback-rm7c4usaqa-uc.a.run.app';
+
+      final response = await _client!.post(
+        Uri.parse('https://aicodefeedback-rm7c4usaqa-uc.a.run.app'),
         headers: {
           'Content-Type': 'application/json',
           'Authorization': 'Bearer $idToken',
@@ -331,6 +424,7 @@ class _CodeFeedbackPageState extends State<CodeFeedbackPage> {
         }
       } else {
         _showError('Failed to get AI feedback. Status: ${response.statusCode}');
+        print('Failed to get AI feedback. Status: ${response.statusCode}');
         debugPrint('Error response: ${response.body}');
       }
     } catch (e) {
