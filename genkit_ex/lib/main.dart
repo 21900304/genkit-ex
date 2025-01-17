@@ -339,6 +339,11 @@ class _CodeFeedbackPageState extends State<CodeFeedbackPage> {
       return;
     }
 
+    if (_questionController.text.isEmpty) {
+      _showError('Please enter your question first');
+      return;
+    }
+
     setState(() {
       _isLoading = true;
     });
@@ -347,22 +352,33 @@ class _CodeFeedbackPageState extends State<CodeFeedbackPage> {
       final user = FirebaseAuth.instance.currentUser;
       if (user == null) throw Exception('User not authenticated');
 
-      final idToken = await user.getIdToken(true);
-      print('Token obtained successfully');
+      final idToken = await user.getIdToken();
 
       final requestBody = {
         'question': _questionController.text,
-        'auth': {
-          'uid': user.uid,
-          'email_verified': user.emailVerified
-        }
+        'auth': {'uid': user.uid, 'email_verified': true}
       };
 
-      final functionUrl = useEmulator
-          ? 'http://localhost:5001/emulators-ex/us-central1/aiCodeFeedback'
+      _client = http.Client();
+
+      /*final functionUrl = const bool.fromEnvironment('USE_FIREBASE_EMULATOR', defaultValue: false)
+          ? 'http://10.0.2.2:5001/your-project-id/us-central1/yourFunctionName'  // 에뮬레이터 URL
           : 'https://aicodefeedback-rm7c4usaqa-uc.a.run.app';
 
-      _client = http.Client();
+      final response = await _client!.post(
+          Uri.parse('https://aicodefeedback-rm7c4usaqa-uc.a.run.app'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $idToken',
+          'Accept': 'application/json',
+        },
+        body: json.encode(requestBody),
+      );*/
+
+      final functionUrl = useEmulator
+          ? 'http://127.0.0.1:5001/emulators-ex/us-central1/aiCodeFeedback'//'http://$emulatorHost:5001/emulators-ex/us-central1/aiCodeFeedback'
+          : 'https://aicodefeedback-rm7c4usaqa-uc.a.run.app';
+
       final response = await _client!.post(
         Uri.parse(functionUrl),
         headers: {
@@ -373,27 +389,52 @@ class _CodeFeedbackPageState extends State<CodeFeedbackPage> {
         body: json.encode(requestBody),
       );
 
-      print('Response status: ${response.statusCode}');
-      print('Response body: ${response.body}');
+      if (!mounted) return;
 
       if (response.statusCode == 200) {
-        final responseData = json.decode(response.body);
-        if (responseData['result'] != null) {
+        String responseBody = response.body.trim();
+
+        if (!responseBody.startsWith('{') && !responseBody.startsWith('[')) {
           setState(() {
-            _aiFeedback = responseData['result'];
+            _aiFeedback = responseBody;
           });
-          await _saveFeedback(_questionController.text, _aiFeedback);
-        } else {
-          throw Exception('Invalid response format');
+          await _saveFeedback(_questionController.text, responseBody);
+          return;
+        }
+
+        try {
+          final jsonResponse = json.decode(responseBody);
+          final feedback = jsonResponse['result'] ??
+              jsonResponse['text'] ??
+              jsonResponse['llmResponse.text'] ??
+              responseBody;
+
+          setState(() {
+            _aiFeedback = feedback.toString();
+          });
+          await _saveFeedback(_questionController.text, feedback.toString());
+        } catch (e) {
+          debugPrint('JSON parse error: $e');
+          debugPrint('Response body: $responseBody');
+
+          setState(() {
+            _aiFeedback = responseBody;
+          });
+          await _saveFeedback(_questionController.text, responseBody);
         }
       } else {
-        final errorData = json.decode(response.body);
-        throw Exception(errorData['error'] ?? 'Unknown error occurred');
+        _showError('Failed to get AI feedback. Status: ${response.statusCode}');
+        print('Failed to get AI feedback. Status: ${response.statusCode}');
+        debugPrint('Error response: ${response.body}');
       }
     } catch (e) {
-      print('Error in _getAiFeedback: $e');
       if (!mounted) return;
-      _showError(e.toString());
+      if (e is http.ClientException) {
+        _showError('Request cancelled');
+      } else {
+        _showError('Error: $e');
+        debugPrint('Error details: $e');
+      }
     } finally {
       if (mounted) {
         setState(() {
@@ -490,22 +531,17 @@ class _CodeFeedbackPageState extends State<CodeFeedbackPage> {
               const SizedBox(height: 16),
               const Text('Answer:', style: TextStyle(fontWeight: FontWeight.bold)),
               Expanded(
-                flex: 0, // Prevents taking up all available space
-                child: ConstrainedBox(
-                  constraints: BoxConstraints(
-                    maxHeight: MediaQuery.of(context).size.height * 0.3, // Limit to 30% of screen height
-                  ),
-                  child: SingleChildScrollView(
-                    child: Container(
-                      padding: const EdgeInsets.all(8.0),
-                      decoration: BoxDecoration(
-                        border: Border.all(color: Colors.grey.shade300),
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: SelectableText(
-                        _aiFeedback,
-                        style: Theme.of(context).textTheme.bodyMedium,
-                      ),
+                flex: 2,
+                child: SingleChildScrollView(
+                  child: Container(
+                    padding: const EdgeInsets.all(8.0),
+                    decoration: BoxDecoration(
+                      border: Border.all(color: Colors.grey.shade300),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: SelectableText(
+                      _aiFeedback,
+                      style: Theme.of(context).textTheme.bodyMedium,
                     ),
                   ),
                 ),
