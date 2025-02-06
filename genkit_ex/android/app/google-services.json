@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "875956008201",
+    "project_id": "ai-project-738a2",
+    "storage_bucket": "ai-project-738a2.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:875956008201:android:d204df412919462bfb0fd8",
+        "android_client_info": {
+          "package_name": "com.example.genkit_ex"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAVJsuOx4vYPvJ_ovubbxGJSX0IrYwNKMA"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

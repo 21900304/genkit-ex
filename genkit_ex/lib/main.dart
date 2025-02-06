@@ -361,22 +361,8 @@ class _CodeFeedbackPageState extends State<CodeFeedbackPage> {
 
       _client = http.Client();
 
-      /*final functionUrl = const bool.fromEnvironment('USE_FIREBASE_EMULATOR', defaultValue: false)
-          ? 'http://10.0.2.2:5001/your-project-id/us-central1/yourFunctionName'  // 에뮬레이터 URL
-          : 'https://aicodefeedback-rm7c4usaqa-uc.a.run.app';
-
-      final response = await _client!.post(
-          Uri.parse('https://aicodefeedback-rm7c4usaqa-uc.a.run.app'),
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer $idToken',
-          'Accept': 'application/json',
-        },
-        body: json.encode(requestBody),
-      );*/
-
       final functionUrl = useEmulator
-          ? 'http://127.0.0.1:5001/emulators-ex/us-central1/aiCodeFeedback'//'http://$emulatorHost:5001/emulators-ex/us-central1/aiCodeFeedback'
+          ? 'http://127.0.0.1:5001/ai-project-738a2/us-central1/aiCodeFeedback'//'http://$emulatorHost:5001/emulators-ex/us-central1/aiCodeFeedback'
           : 'https://aicodefeedback-rm7c4usaqa-uc.a.run.app';
 
       final response = await _client!.post(
