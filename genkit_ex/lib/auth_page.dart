@@ -1,10 +1,7 @@
-/*
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:flutter/cupertino.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-
-import 'code_feedback_page.dart';
+import 'package:genkit_ex/stream_feedback_page.dart';
 
 class AuthPage extends StatefulWidget {
   const AuthPage({super.key});
@@ -48,7 +45,7 @@ class _AuthPageState extends State<AuthPage> {
           if (mounted) {
             Navigator.of(context).pushReplacement(
               MaterialPageRoute(
-                builder: (context) => const CodeFeedbackPage(title: 'AI Code Feedback'),
+                builder: (context) => const StreamFeedbackPage(title: 'AI Code Feedback'),
               ),
             );
           }
@@ -168,4 +165,4 @@ class _AuthPageState extends State<AuthPage> {
       ),
     );
   }
-}*/
+}
