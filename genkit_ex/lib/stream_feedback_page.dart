@@ -206,7 +206,8 @@ class _StreamFeedbackPageState extends State<StreamFeedbackPage> {
       final idToken = await user.getIdToken();
       final functionUrl = const bool.fromEnvironment('USE_FIREBASE_EMULATOR', defaultValue: false)
           ? 'http://localhost:5001/ai-project-738a2/us-central1/aiStreamingFeedback'
-          : 'https://your-production-function-url.com';
+          : 'https://aistreamingfeedback-exl7rrk7da-uc.a.run.app';
+          //: 'https://your-production-function-url.com';
 
       final response = await http.post(
         Uri.parse(functionUrl),
@@ -421,7 +422,7 @@ class _StreamFeedbackPageState extends State<StreamFeedbackPage> {
     );
   }
 
- @override
+  @override
   void dispose() {
     _sseSubscription?.cancel();
     socket.disconnect();

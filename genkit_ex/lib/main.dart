@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'dart:math';
 
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
@@ -49,6 +50,8 @@ Future<void> main() async {
         sslEnabled: false,
         persistenceEnabled: false,
       );
+
+      FirebaseFunctions.instance.useFunctionsEmulator(host, 5001);
 
       if (kDebugMode) {
         print('Successfully connected to Firebase Emulators');
