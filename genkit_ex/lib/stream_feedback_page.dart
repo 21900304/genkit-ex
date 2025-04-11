@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -11,13 +12,46 @@ import 'package:intl/intl.dart';
 import 'package:socket_io_client/socket_io_client.dart' as IO;
 import 'package:http/http.dart' as http;
 
+// 요청 유형 정의
+enum RequestType {
+  codeFeedback,
+  codeGeneration,
+  qna
+}
+
+extension RequestTypeExtension on RequestType {
+  String get value {
+    switch (this) {
+      case RequestType.codeFeedback:
+        return 'codeFeedback';
+      case RequestType.codeGeneration:
+        return 'codeGeneration';
+      case RequestType.qna:
+        return 'qna';
+    }
+  }
+
+  String get displayName {
+    switch (this) {
+      case RequestType.codeFeedback:
+        return '코드 피드백';
+      case RequestType.codeGeneration:
+        return '문제 생성';
+      case RequestType.qna:
+        return '질의 응답';
+    }
+  }
+}
+
 class FeedbackData {
   final String question;
   final String feedback;
+  final String requestType;
 
   FeedbackData({
     required this.question,
     required this.feedback,
+    this.requestType = 'qna',
   });
 
   factory FeedbackData.fromFirestore(DocumentSnapshot doc) {
@@ -25,6 +59,7 @@ class FeedbackData {
     return FeedbackData(
       question: data['question'] ?? '',
       feedback: data['feedback'] ?? '',
+      requestType: data['requestType'] ?? 'qna',
     );
   }
 }
@@ -47,59 +82,20 @@ class _StreamFeedbackPageState extends State<StreamFeedbackPage> {
   bool _isLoading = false;
   StreamSubscription? _sseSubscription;
 
+  // 선택된 요청 유형
+  RequestType _selectedRequestType = RequestType.qna;
+
   @override
   void initState() {
     super.initState();
     _initializeSocket();
-    _loadPreviousFeedbacks();
   }
 
-  Future<void> _loadPreviousFeedbacks() async {
-    if (!mounted) return;
-
-    setState(() {
-      _isLoading = true;
-    });
-
-    try {
-      final user = FirebaseAuth.instance.currentUser;
-      if (user == null) return;
-
-      final querySnapshot = await FirebaseFirestore.instance
-          .collection('streaming_feedback')
-          .where('userId', isEqualTo: user.uid)
-          .orderBy('timestamp', descending: true)
-          .limit(10)
-          .get();
-
-      if (!mounted) return;
-
-      setState(() {
-        previousFeedbacks = querySnapshot.docs
-            .map((doc) => FeedbackData.fromFirestore(doc))
-            .toList();
-        _isLoading = false;
-      });
-    } catch (e) {
-      if (kDebugMode) {
-        print('Error loading previous feedbacks: $e');
-      }
-      if (!mounted) return;
-
-      setState(() {
-        _isLoading = false;
-      });
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to load previous feedbacks: ${e.toString()}')),
-      );
-    }
-  }
 
   void _initializeSocket() {
     final serverUrl = const bool.fromEnvironment('USE_FIREBASE_EMULATOR', defaultValue: false)
         ? 'http://localhost:3001'
-        : 'https://your-production-domain.com';
+        : 'http://localhost:3001';
 
     if (kDebugMode) {
       print('Platform: ${kIsWeb ? 'Web' : Platform.operatingSystem}');
@@ -193,52 +189,68 @@ class _StreamFeedbackPageState extends State<StreamFeedbackPage> {
     });
 
     final user = FirebaseAuth.instance.currentUser;
-    if (user == null) return;
+    if (user == null) {
+      setState(() {
+        _isStreaming = false;
+        _isProcessing = false;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('로그인이 필요합니다')),
+      );
+      return;
+    }
 
     try {
-      // WebSocket 스트림 시작
+      // 사용자 인증 토큰 획득
+      final idToken = await user.getIdToken();
+
+      if (kDebugMode) {
+        print('Starting stream with socket.io');
+        print('User ID: ${user.uid}');
+        print('Request Type: ${_selectedRequestType.value}');
+        print('Question: ${_questionController.text.substring(0, min(50, _questionController.text.length))}...');
+      }
+
+      // 소켓 연결 확인
+      if (!socket.connected) {
+        if (kDebugMode) {
+          print('Socket disconnected, attempting to reconnect...');
+        }
+
+        // 소켓 재연결 시도
+        socket.connect();
+
+        // 연결 대기
+        await Future.delayed(const Duration(seconds: 2));
+
+        if (!socket.connected) {
+          throw Exception('Socket connection failed. Please try again later.');
+        }
+      }
+
+      // 응답 처리를 위한 리스너 설정 (기존 리스너가 없을 경우에만)
+      _setupSocketListeners();
+
+      // 스트리밍 요청 전송 (요청 유형 포함)
       socket.emit('startStream', {
         'question': _questionController.text,
         'userId': user.uid,
+        'idToken': idToken,
+        'requestType': _selectedRequestType.value, // 요청 유형 추가
       });
 
-      // Cloud Function 호출
-      final idToken = await user.getIdToken();
-      final functionUrl = const bool.fromEnvironment('USE_FIREBASE_EMULATOR', defaultValue: false)
-          ? 'http://localhost:5001/ai-project-738a2/us-central1/aiStreamingFeedback'
-          : 'https://aistreamingfeedback-exl7rrk7da-uc.a.run.app';
-          //: 'https://your-production-function-url.com';
-
-      final response = await http.post(
-        Uri.parse(functionUrl),
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer $idToken',
-        },
-        body: json.encode({
-          'question': _questionController.text,
-        }),
-      );
-
-      if (response.statusCode == 200) {
-        final stream = response.body.split('\n\n');
-        for (var data in stream) {
-          if (data.startsWith('data: ')) {
-            final jsonData = json.decode(data.substring(6));
-            if (jsonData['done'] == true) {
-              setState(() {
-                _isProcessing = false;
-              });
-              break;
+      // 타임아웃 설정 (60초)
+      Future.delayed(const Duration(seconds: 60), () {
+        if (_isProcessing) {
+          setState(() {
+            _isProcessing = false;
+            if (_streamResponse.isEmpty) {
+              _streamResponse = '응답 시간이 초과되었습니다. 나중에 다시 시도해주세요.';
             }
-            setState(() {
-              _streamResponse += jsonData['text'] ?? '';
-            });
-          }
+          });
         }
-      } else {
-        throw Exception('Failed to connect to Cloud Function: ${response.statusCode}');
-      }
+      });
+
     } catch (error) {
       if (kDebugMode) {
         print('Error during stream processing: $error');
@@ -246,11 +258,62 @@ class _StreamFeedbackPageState extends State<StreamFeedbackPage> {
       setState(() {
         _isStreaming = false;
         _isProcessing = false;
+        if (_streamResponse.isEmpty) {
+          _streamResponse = '오류가 발생했습니다: ${error.toString()}';
+        }
       });
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Error: ${error.toString()}')),
       );
     }
+  }
+
+  // 소켓 리스너 설정 메서드
+  void _setupSocketListeners() {
+    // 기존 리스너 제거
+    socket.off('streamData');
+    socket.off('streamError');
+
+    // 데이터 수신 리스너
+    socket.on('streamData', (data) {
+      if (mounted) {
+        if (data is Map<String, dynamic>) {
+          setState(() {
+            if (data['isDone'] == true) {
+              _isStreaming = false;
+              _isProcessing = false;
+            } else {
+              final text = data['text'];
+              if (text != null && text.toString().isNotEmpty) {
+                // '처리 중입니다...' 메시지를 받았을 때 초기화
+                if (_streamResponse == '처리 중입니다...' && text.toString() != '처리 중입니다...') {
+                  _streamResponse = text.toString();
+                } else {
+                  _streamResponse += text.toString();
+                }
+              }
+            }
+          });
+        }
+      }
+    });
+
+    // 오류 수신 리스너
+    socket.on('streamError', (data) {
+      if (mounted) {
+        setState(() {
+          _isStreaming = false;
+          _isProcessing = false;
+
+          // 오류 메시지가 있으면 표시
+          if (data is Map<String, dynamic> && data['message'] != null) {
+            _streamResponse += '\n\n오류: ${data['message']}';
+          } else {
+            _streamResponse += '\n\n알 수 없는 오류가 발생했습니다.';
+          }
+        });
+      }
+    });
   }
 
   @override
@@ -261,8 +324,8 @@ class _StreamFeedbackPageState extends State<StreamFeedbackPage> {
         title: Text(widget.title),
         actions: [
           IconButton(
-            icon: const Icon(Icons.refresh),
-            onPressed: _loadPreviousFeedbacks,
+              icon: const Icon(Icons.refresh),
+              onPressed: (){}//_loadPreviousFeedbacks,
           ),
         ],
       ),
@@ -315,13 +378,36 @@ class _StreamFeedbackPageState extends State<StreamFeedbackPage> {
                     style: Theme.of(context).textTheme.titleLarge,
                   ),
                   const SizedBox(height: 16),
+                  // 요청 유형 선택기 추가
+                  DropdownButtonFormField<RequestType>(
+                    value: _selectedRequestType,
+                    decoration: const InputDecoration(
+                      border: OutlineInputBorder(),
+                      labelText: '요청 유형 선택',
+                      filled: true,
+                    ),
+                    items: RequestType.values.map((type) {
+                      return DropdownMenuItem<RequestType>(
+                        value: type,
+                        child: Text(type.displayName),
+                      );
+                    }).toList(),
+                    onChanged: (RequestType? value) {
+                      if (value != null) {
+                        setState(() {
+                          _selectedRequestType = value;
+                        });
+                      }
+                    },
+                  ),
+                  const SizedBox(height: 16),
                   TextField(
                     controller: _questionController,
                     maxLines: 3,
                     decoration: InputDecoration(
                       border: const OutlineInputBorder(),
-                      labelText: 'Your Question',
-                      hintText: 'Type your question here...',
+                      labelText: _getQuestionLabel(),
+                      hintText: _getQuestionHint(),
                       filled: true,
                       fillColor: Colors.grey[50],
                     ),
@@ -386,39 +472,33 @@ class _StreamFeedbackPageState extends State<StreamFeedbackPage> {
     );
   }
 
+  // 요청 유형에 따른 질문 라벨 반환
+  String _getQuestionLabel() {
+    switch (_selectedRequestType) {
+      case RequestType.codeFeedback:
+        return '코드와 요구사항';
+      case RequestType.codeGeneration:
+        return '문제 생성을 위한 조건';
+      case RequestType.qna:
+        return '질문';
+    }
+  }
+
+  // 요청 유형에 따른 힌트 텍스트 반환
+  String _getQuestionHint() {
+    switch (_selectedRequestType) {
+      case RequestType.codeFeedback:
+        return '코드를 입력한 후, [요구사항] 형식으로 요구사항을 작성하세요';
+      case RequestType.codeGeneration:
+        return '문제 생성을 위한 조건을 입력하세요 (예: 난이도, 주제, 특정 개념 등)';
+      case RequestType.qna:
+        return '질문을 입력하세요';
+    }
+  }
+
   Widget _buildHistoryTab() {
-    if (_isLoading) {
-      return const Center(child: CircularProgressIndicator());
-    }
-
-    if (previousFeedbacks.isEmpty) {
-      return const Center(
-        child: Text('No previous feedbacks available'),
-      );
-    }
-
-    return ListView.builder(
-      padding: const EdgeInsets.all(16.0),
-      itemCount: previousFeedbacks.length,
-      itemBuilder: (context, index) {
-        final feedback = previousFeedbacks[index];
-        return Card(
-          margin: const EdgeInsets.only(bottom: 16.0),
-          child: ExpansionTile(
-            title: Text(
-              feedback.question,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-            ),
-            children: [
-              Padding(
-                padding: const EdgeInsets.all(16.0),
-                child: SelectableText(feedback.feedback),
-              ),
-            ],
-          ),
-        );
-      },
+    return const Center(
+      child: Text('DB에 안 찍을 거지롱 >ㅁ<'),
     );
   }
 
