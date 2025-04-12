@@ -30,7 +30,7 @@ const ai = genkit({
   ],
 });
 
-const promptTemplates = {
+const defaultPromptTemplates = {
   "codeFeedback": "I will provide you with Flutter code" +
     "and specific requirements. " +
     "Please analyze the code " +
@@ -57,6 +57,56 @@ const promptTemplates = {
     " answer to the following question:\n\n${question}",
 };
 
+const userTemplates = new Map();
+
+/**
+ * 사용자별 템플릿 저장 또는 업데이트
+ * @param {string} userId - 사용자 ID
+ * @param {string} requestType - 요청 유형
+ * @param {string} template - 템플릿 문자열
+ */
+function saveUserTemplate(userId, requestType, template) {
+  if (!userId || !requestType || !template) return;
+  if (!userTemplates.has(userId)) {
+    userTemplates.set(userId, {});
+  }
+  const userTemplate = userTemplates.get(userId);
+  userTemplate[requestType] = template;
+  console.log(`Updated template for user ${userId}, type: ${requestType}`);
+}
+
+/**
+ * 사용자별 템플릿 조회
+ * @param {string} userId - 사용자 ID
+ * @param {string} requestType - 요청 유형
+ * @return {string} - 템플릿 문자열 또는 기본 템플릿
+ */
+function getUserTemplate(userId, requestType) {
+  if (!userId || !requestType) {
+    return defaultPromptTemplates[requestType] || "";
+  }
+  const userTemplate = userTemplates.get(userId);
+  if (userTemplate && userTemplate[requestType]) {
+    return userTemplate[requestType];
+  }
+  return defaultPromptTemplates[requestType] || "";
+}
+
+/**
+ * 프롬프트 템플릿에 변수 적용
+ * @param {string} template - 템플릿 문자열
+ * @param {Object} variables - 변수 맵
+ * @return {string} - 변수가 적용된 템플릿
+ */
+function applyTemplateVariables(template, variables) {
+  let result = template;
+  for (const [key, value] of Object.entries(variables)) {
+    const placeholder = `\${${key}}`;
+    result = result.replace(placeholder, value);
+  }
+  return result;
+}
+
 /**
  * Executes streaming AI flow with the given input and response object
  * @param {Object} input - The input containing question, type and auth data
@@ -67,23 +117,35 @@ async function executeStreamingAIFlow(input, res) {
   const db = admin.firestore();
   let docRef;
   try {
+    const userId = input.auth.uid;
     const requestType = input.requestType || "qna";
-    let prompt = " ";
+    let prompt = "";
+    if (input.customTemplate) {
+      saveUserTemplate(userId, requestType, input.customTemplate);
+    }
+
     if (requestType === "codeFeedback") {
       const [code, requirements] =
           input.question.split(/,\s*\[|\]/).filter(Boolean);
       if (code && requirements) {
-        prompt = promptTemplates["codeFeedback"]
-            .replace("${code}", code)
-            .replace("${requirements}", requirements);
+        const template = getUserTemplate(userId, requestType);
+        prompt = applyTemplateVariables(template, {
+          code: code,
+          requirements: requirements,
+        });
       } else {
         prompt = input.question;
       }
     } else if (requestType === "codeGeneration") {
-      prompt = promptTemplates["codeGeneration"]
-          .replace("${specifications}", input.question);
+      const template = getUserTemplate(userId, requestType);
+      prompt = applyTemplateVariables(template, {
+        specifications: input.question,
+      });
     } else {
-      prompt = promptTemplates["qna"].replace("${question}", input.question);
+      const template = getUserTemplate(userId, "qna");
+      prompt = applyTemplateVariables(template, {
+        question: input.question,
+      });
     }
     res.setHeader("Content-Type", "text/event-stream");
     res.setHeader("Cache-Control", "no-cache");
@@ -92,11 +154,12 @@ async function executeStreamingAIFlow(input, res) {
 
     docRef = db.collection("streaming_feedback").doc();
     await docRef.set({
-      userId: input.auth.uid,
+      userId: userId,
       question: input.question,
       requestType: requestType,
       timestamp: new Date().toISOString(),
       status: "streaming",
+      hasCustomTemplate: !!input.customTemplate,
     });
 
     const RESPONSE_TIMEOUT = 300000;
@@ -226,11 +289,21 @@ exports.aiStreamingFeedback = functions.https.onRequest(async (req, res) => {
         return;
       }
 
+      const customTemplate = req.body.customTemplate;
+      const userId = decodedToken.sub || decodedToken.user_id;
+      const requestType = req.body.requestType || "qna";
+      console.log(`Request from user ${userId}, type: ${requestType},
+        has custom template: ${!!customTemplate}`);
+      if (customTemplate) {
+        saveUserTemplate(userId, requestType, customTemplate);
+      }
+
       await executeStreamingAIFlow({
         question: req.body.question,
-        requestType: req.body.requestType || "qna",
+        requestType: requestType,
+        customTemplate: customTemplate,
         auth: {
-          uid: decodedToken.sub || decodedToken.user_id,
+          uid: userId,
           email_verified: decodedToken.email_verified,
         },
       }, res);

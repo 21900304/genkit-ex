@@ -11,6 +11,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:socket_io_client/socket_io_client.dart' as IO;
 import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart'; // 로컬 저장소를 위해 추가
 
 // 요청 유형 정의
 enum RequestType {
@@ -40,6 +41,63 @@ extension RequestTypeExtension on RequestType {
       case RequestType.qna:
         return '질의 응답';
     }
+  }
+}
+
+// 프롬프트 템플릿 관리를 위한 클래스 추가
+class PromptTemplates {
+  String codeFeedback;
+  String codeGeneration;
+  String qna;
+
+  PromptTemplates({
+    required this.codeFeedback,
+    required this.codeGeneration,
+    required this.qna,
+  });
+
+  // JSON으로 변환
+  Map<String, dynamic> toJson() {
+    return {
+      'codeFeedback': codeFeedback,
+      'codeGeneration': codeGeneration,
+      'qna': qna,
+    };
+  }
+
+  // JSON에서 객체로 변환
+  factory PromptTemplates.fromJson(Map<String, dynamic> json) {
+    return PromptTemplates(
+      codeFeedback: json['codeFeedback'] ?? '',
+      codeGeneration: json['codeGeneration'] ?? '',
+      qna: json['qna'] ?? '',
+    );
+  }
+
+  // 기본 템플릿 제공
+  factory PromptTemplates.defaults() {
+    return PromptTemplates(
+      codeFeedback: "I will provide you with Flutter code and specific requirements. " +
+          "Please analyze the code and provide suggestions based on the requirements.\n\n" +
+          "Flutter Code:\n" +
+          "\${code}\n\n" +
+          "Requirements:\n" +
+          "\${requirements}\n\n" +
+          "Please provide:\n" +
+          "1. Analysis of how well the code meets the requirements\n" +
+          "2. Specific suggestions for improvements or modifications\n" +
+          "3. Code examples for suggested changes if necessary\n" +
+          "4. Best practices and optimization recommendations",
+      codeGeneration: "Please generate a coding problem based on the following specifications." +
+          "The problem should be challenging but solvable, and include:\n" +
+          "1. A clear problem statement\n" +
+          "2. Input and output specifications\n" +
+          "3. Example inputs and expected outputs\n" +
+          "4. Constraints or limitations\n" +
+          "5. Hints for solving (optional)\n\n" +
+          "Specifications: \${specifications}",
+      qna: "Please provide a detailed and accurate answer to the following question:\n\n\${question}",
+    );
   }
 }
 
@@ -85,12 +143,138 @@ class _StreamFeedbackPageState extends State<StreamFeedbackPage> {
   // 선택된 요청 유형
   RequestType _selectedRequestType = RequestType.qna;
 
+  // 프롬프트 템플릿 관리
+  late PromptTemplates _promptTemplates;
+  bool _isPromptTemplatesLoaded = false;
+
+  // 템플릿 편집을 위한 컨트롤러
+  final TextEditingController _codeFeedbackController = TextEditingController();
+  final TextEditingController _codeGenerationController = TextEditingController();
+  final TextEditingController _qnaController = TextEditingController();
+
   @override
   void initState() {
     super.initState();
+    _loadPromptTemplates();
     _initializeSocket();
   }
 
+  // 프롬프트 템플릿 로드
+  Future<void> _loadPromptTemplates() async {
+    setState(() {
+      _isLoading = true;
+    });
+
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) {
+        // 로그인하지 않은 경우 로컬 저장소에서 로드
+        _loadLocalPromptTemplates();
+        return;
+      }
+
+      // Firestore에서 사용자별 프롬프트 템플릿 로드
+      final docSnapshot = await FirebaseFirestore.instance
+          .collection('user_prompt_templates')
+          .doc(user.uid)
+          .get();
+
+      if (docSnapshot.exists) {
+        final data = docSnapshot.data() as Map<String, dynamic>;
+        _promptTemplates = PromptTemplates.fromJson(data);
+      } else {
+        // 템플릿이 없으면 기본값 설정 후 저장
+        _promptTemplates = PromptTemplates.defaults();
+        _savePromptTemplates();
+      }
+
+      // 컨트롤러 초기화
+      _initializeControllers();
+    } catch (e) {
+      if (kDebugMode) {
+        print('Error loading prompt templates: $e');
+      }
+      // 오류 발생 시 로컬 저장소에서 로드
+      _loadLocalPromptTemplates();
+    } finally {
+      setState(() {
+        _isPromptTemplatesLoaded = true;
+        _isLoading = false;
+      });
+    }
+  }
+
+  // 로컬 저장소에서 프롬프트 템플릿 로드
+  Future<void> _loadLocalPromptTemplates() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final templatesJson = prefs.getString('prompt_templates');
+
+      if (templatesJson != null) {
+        _promptTemplates = PromptTemplates.fromJson(jsonDecode(templatesJson));
+      } else {
+        _promptTemplates = PromptTemplates.defaults();
+      }
+
+      // 컨트롤러 초기화
+      _initializeControllers();
+    } catch (e) {
+      if (kDebugMode) {
+        print('Error loading local prompt templates: $e');
+      }
+      // 오류 발생 시 기본값 사용
+      _promptTemplates = PromptTemplates.defaults();
+      _initializeControllers();
+    } finally {
+      setState(() {
+        _isPromptTemplatesLoaded = true;
+        _isLoading = false;
+      });
+    }
+  }
+
+  // 컨트롤러 초기화
+  void _initializeControllers() {
+    _codeFeedbackController.text = _promptTemplates.codeFeedback;
+    _codeGenerationController.text = _promptTemplates.codeGeneration;
+    _qnaController.text = _promptTemplates.qna;
+  }
+
+  // 프롬프트 템플릿 저장
+  Future<void> _savePromptTemplates() async {
+    try {
+      // 현재 컨트롤러 값으로 템플릿 업데이트
+      _promptTemplates = PromptTemplates(
+        codeFeedback: _codeFeedbackController.text,
+        codeGeneration: _codeGenerationController.text,
+        qna: _qnaController.text,
+      );
+
+      // 로컬 저장소에 저장
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('prompt_templates', jsonEncode(_promptTemplates.toJson()));
+
+      // 로그인한 사용자면 Firestore에도 저장
+      final user = FirebaseAuth.instance.currentUser;
+      if (user != null) {
+        await FirebaseFirestore.instance
+            .collection('user_prompt_templates')
+            .doc(user.uid)
+            .set(_promptTemplates.toJson());
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('템플릿이 저장되었습니다')),
+      );
+    } catch (e) {
+      if (kDebugMode) {
+        print('Error saving prompt templates: $e');
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('템플릿 저장 중 오류가 발생했습니다: ${e.toString()}')),
+      );
+    }
+  }
 
   void _initializeSocket() {
     final serverUrl = const bool.fromEnvironment('USE_FIREBASE_EMULATOR', defaultValue: false)
@@ -231,12 +415,13 @@ class _StreamFeedbackPageState extends State<StreamFeedbackPage> {
       // 응답 처리를 위한 리스너 설정 (기존 리스너가 없을 경우에만)
       _setupSocketListeners();
 
-      // 스트리밍 요청 전송 (요청 유형 포함)
+      // 스트리밍 요청 전송 (요청 유형 및 커스텀 템플릿 포함)
       socket.emit('startStream', {
         'question': _questionController.text,
         'userId': user.uid,
         'idToken': idToken,
-        'requestType': _selectedRequestType.value, // 요청 유형 추가
+        'requestType': _selectedRequestType.value,
+        'customTemplate': _getCurrentTemplate(), // 현재 선택된 유형의 커스텀 템플릿 전송
       });
 
       // 타임아웃 설정 (60초)
@@ -265,6 +450,22 @@ class _StreamFeedbackPageState extends State<StreamFeedbackPage> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Error: ${error.toString()}')),
       );
+    }
+  }
+
+  // 현재 선택된 요청 유형에 따른 템플릿 반환
+  String _getCurrentTemplate() {
+    if (!_isPromptTemplatesLoaded) {
+      return '';
+    }
+
+    switch (_selectedRequestType) {
+      case RequestType.codeFeedback:
+        return _promptTemplates.codeFeedback;
+      case RequestType.codeGeneration:
+        return _promptTemplates.codeGeneration;
+      case RequestType.qna:
+        return _promptTemplates.qna;
     }
   }
 
@@ -324,12 +525,14 @@ class _StreamFeedbackPageState extends State<StreamFeedbackPage> {
         title: Text(widget.title),
         actions: [
           IconButton(
-              icon: const Icon(Icons.refresh),
-              onPressed: (){}//_loadPreviousFeedbacks,
+            icon: const Icon(Icons.settings),
+            onPressed: () => _showTemplateSettingsDialog(),
           ),
         ],
       ),
-      body: Column(
+      body: _isLoading
+          ? const Center(child: CircularProgressIndicator())
+          : Column(
         children: [
           Expanded(
             child: DefaultTabController(
@@ -354,6 +557,98 @@ class _StreamFeedbackPageState extends State<StreamFeedbackPage> {
                 ],
               ),
             ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // 템플릿 설정 다이얼로그 표시
+  void _showTemplateSettingsDialog() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('프롬프트 템플릿 설정'),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text('각 요청 타입에 대한 커스텀 프롬프트 템플릿을 설정하세요.'),
+                const SizedBox(height: 16),
+
+                // 코드 피드백 템플릿
+                const Text('코드 피드백 템플릿:', style: TextStyle(fontWeight: FontWeight.bold)),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: _codeFeedbackController,
+                  maxLines: 6,
+                  decoration: const InputDecoration(
+                    border: OutlineInputBorder(),
+                    hintText: '코드 피드백을 위한 프롬프트 템플릿',
+                    filled: true,
+                  ),
+                ),
+                const SizedBox(height: 16),
+
+                // 코드 생성 템플릿
+                const Text('문제 생성 템플릿:', style: TextStyle(fontWeight: FontWeight.bold)),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: _codeGenerationController,
+                  maxLines: 6,
+                  decoration: const InputDecoration(
+                    border: OutlineInputBorder(),
+                    hintText: '문제 생성을 위한 프롬프트 템플릿',
+                    filled: true,
+                  ),
+                ),
+                const SizedBox(height: 16),
+
+                // 질의응답 템플릿
+                const Text('질의응답 템플릿:', style: TextStyle(fontWeight: FontWeight.bold)),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: _qnaController,
+                  maxLines: 6,
+                  decoration: const InputDecoration(
+                    border: OutlineInputBorder(),
+                    hintText: '질의응답을 위한 프롬프트 템플릿',
+                    filled: true,
+                  ),
+                ),
+
+                const SizedBox(height: 8),
+                Text(
+                  '변수는 \${code}, \${requirements}, \${specifications}, \${question} 등으로 사용할 수 있습니다.',
+                  style: TextStyle(color: Colors.grey[700], fontSize: 12),
+                )
+              ],
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.pop(context);
+              // 기본값으로 리셋
+              _codeFeedbackController.text = PromptTemplates.defaults().codeFeedback;
+              _codeGenerationController.text = PromptTemplates.defaults().codeGeneration;
+              _qnaController.text = PromptTemplates.defaults().qna;
+            },
+            child: const Text('기본값으로 리셋'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('취소'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.pop(context);
+              _savePromptTemplates();
+            },
+            child: const Text('저장'),
           ),
         ],
       ),
@@ -507,6 +802,9 @@ class _StreamFeedbackPageState extends State<StreamFeedbackPage> {
     _sseSubscription?.cancel();
     socket.disconnect();
     _questionController.dispose();
+    _codeFeedbackController.dispose();
+    _codeGenerationController.dispose();
+    _qnaController.dispose();
     super.dispose();
   }
 }

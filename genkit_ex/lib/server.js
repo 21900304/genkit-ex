@@ -123,10 +123,11 @@ io.on('connection', (socket) => {
     console.log('Transport type:', socket.conn.transport.name);
 
     socket.on('startStream', async (data) => {
-      const { question, userId, idToken, requestType = 'qna' } = data; // 요청 유형 추가
+      const { question, userId, idToken, requestType = 'qna', customTemplate } = data; // 커스텀 템플릿 추가
       console.log('Received stream request:', {
         userId,
-        requestType, // 요청 유형 로깅
+        requestType,
+        hasCustomTemplate: !!customTemplate, // 커스텀 템플릿 존재 여부 로깅
         question: question.substring(0, 100) + '...'
       });
 
@@ -146,7 +147,8 @@ io.on('connection', (socket) => {
         startTime: startTime,
         firstResponseReceived: false,
         completed: false,
-        requestType: requestType // 요청 유형 저장
+        requestType: requestType,
+        customTemplate: customTemplate // 커스텀 템플릿 저장
       });
 
       // 타임아웃 설정
@@ -170,7 +172,7 @@ io.on('connection', (socket) => {
         socket.emit('streamData', {
           text: '처리 중입니다...',
           isDone: false,
-          requestType: requestType // 요청 유형 포함
+          requestType: requestType
         });
 
         // EventSource를 사용한 SSE 연결
@@ -180,16 +182,23 @@ io.on('connection', (socket) => {
           'Content-Type': 'application/json'
         };
 
+        // POST 요청 데이터 준비 - 커스텀 템플릿 포함
+        const requestData = {
+          question,
+          requestType
+        };
+
+        // 커스텀 템플릿이 제공된 경우에만 추가
+        if (customTemplate) {
+          requestData.customTemplate = customTemplate;
+        }
+
         // POST 요청을 위한 준비
-        // POST 본문을 직접 보낼 수 없으므로 별도의 HTTP 요청으로 세션 초기화
         const initResponse = await axios({
           method: 'post',
           url: CLOUD_FUNCTION_URL,
           headers: headers,
-          data: {
-            question,
-            requestType // 요청 유형 포함
-          },
+          data: requestData,
           responseType: 'text'
         });
 
@@ -240,7 +249,7 @@ io.on('connection', (socket) => {
                 socket.emit('responseTiming', {
                   timeToFirstResponseMs: timeToFirstResponse,
                   timeToFirstResponseSeconds: (timeToFirstResponse / 1000).toFixed(2),
-                  requestType: requestType // 요청 유형 포함
+                  requestType: requestType
                 });
               }
 
@@ -259,7 +268,7 @@ io.on('connection', (socket) => {
                 socket.emit('streamData', {
                   text: '',
                   isDone: true,
-                  requestType: requestType, // 요청 유형 포함
+                  requestType: requestType,
                   responseTiming: {
                     totalTimeMs: totalResponseTime,
                     totalTimeSeconds: (totalResponseTime / 1000).toFixed(2),
@@ -282,7 +291,7 @@ io.on('connection', (socket) => {
                 socket.emit('streamData', {
                   text: jsonData.text,
                   isDone: false,
-                  requestType: requestType // 요청 유형 포함
+                  requestType: requestType
                 });
               } else if (jsonData.error) {
                 throw new Error(jsonData.error);
@@ -310,7 +319,7 @@ io.on('connection', (socket) => {
           socket.emit('streamData', {
             text: '',
             isDone: true,
-            requestType: requestType, // 요청 유형 포함
+            requestType: requestType,
             responseTiming: {
               totalTimeMs: totalResponseTime,
               totalTimeSeconds: (totalResponseTime / 1000).toFixed(2),
@@ -326,7 +335,7 @@ io.on('connection', (socket) => {
           socket.emit('streamData', {
             text: '',
             isDone: true,
-            requestType: requestType // 요청 유형 포함
+            requestType: requestType
           });
         }
       } catch (error) {
@@ -336,7 +345,7 @@ io.on('connection', (socket) => {
         if (userSessions.has(userId)) {
           socket.emit('streamError', {
             message: error.message || 'Error in stream processing',
-            requestType: requestType // 요청 유형 포함
+            requestType: requestType
           });
         }
       } finally {
