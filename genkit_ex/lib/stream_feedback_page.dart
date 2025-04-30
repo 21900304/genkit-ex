@@ -536,13 +536,12 @@ class _StreamFeedbackPageState extends State<StreamFeedbackPage> {
         children: [
           Expanded(
             child: DefaultTabController(
-              length: 2,
+              length: 1,
               child: Column(
                 children: [
                   TabBar(
                     tabs: const [
                       Tab(text: 'New Question'),
-                      Tab(text: 'History'),
                     ],
                     labelColor: Theme.of(context).primaryColor,
                   ),
@@ -550,7 +549,6 @@ class _StreamFeedbackPageState extends State<StreamFeedbackPage> {
                     child: TabBarView(
                       children: [
                         _buildNewQuestionTab(),
-                        _buildHistoryTab(),
                       ],
                     ),
                   ),
@@ -791,11 +789,11 @@ class _StreamFeedbackPageState extends State<StreamFeedbackPage> {
     }
   }
 
-  Widget _buildHistoryTab() {
+  /*Widget _buildHistoryTab() {
     return const Center(
       child: Text('DB에 안 찍을 거지롱 >ㅁ<'),
     );
-  }
+  }*/
 
   @override
   void dispose() {
