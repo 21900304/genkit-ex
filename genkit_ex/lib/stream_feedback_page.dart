@@ -140,6 +140,9 @@ class _StreamFeedbackPageState extends State<StreamFeedbackPage> {
   bool _isLoading = false;
   StreamSubscription? _sseSubscription;
 
+  // 응답 시간을 저장할 변수 추가
+  Map<String, dynamic>? _responseTiming;
+
   // 선택된 요청 유형
   RequestType _selectedRequestType = RequestType.qna;
 
@@ -158,7 +161,6 @@ class _StreamFeedbackPageState extends State<StreamFeedbackPage> {
     _loadPromptTemplates();
     _initializeSocket();
   }
-
   // 프롬프트 템플릿 로드
   Future<void> _loadPromptTemplates() async {
     setState(() {
@@ -302,36 +304,6 @@ class _StreamFeedbackPageState extends State<StreamFeedbackPage> {
       }
     });
 
-    socket.on('streamData', (data) {
-      if (mounted) {
-        if (data is Map<String, dynamic>) {
-          setState(() {
-            if (data['isDone'] == true) {
-              _isStreaming = false;
-              _isProcessing = false;
-            } else {
-              final text = data['text'];
-              if (text != null) {
-                _streamResponse += text.toString();
-              }
-            }
-          });
-        }
-      }
-    });
-
-    socket.on('streamError', (data) {
-      if (mounted) {
-        setState(() {
-          _isStreaming = false;
-          _isProcessing = false;
-        });
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(data['message'] ?? 'Stream error occurred')),
-        );
-      }
-    });
-
     socket.onError((error) {
       if (kDebugMode) {
         print('Socket error details:');
@@ -356,6 +328,150 @@ class _StreamFeedbackPageState extends State<StreamFeedbackPage> {
     });
 
     socket.connect();
+
+    // 소켓 리스너 설정
+    _setupSocketListeners();
+  }
+
+  // _setupSocketListeners() 메서드 수정
+  void _setupSocketListeners() {
+    // 기존 리스너 제거
+    socket.off('streamData');
+    socket.off('streamError');
+    socket.off('responseTiming');
+
+    // 데이터 수신 리스너
+    socket.on('streamData', (data) {
+      // mounted 체크 추가
+      if (!mounted) return;
+
+      if (data is Map) {
+        setState(() {
+          if (data['isDone'] == true) {
+            _isStreaming = false;
+            _isProcessing = false;
+
+            // 응답 완료 시 응답 타이밍 정보가 있다면 저장
+            if (data['responseTiming'] != null) {
+              try {
+                _responseTiming = Map<String, dynamic>.from(data['responseTiming'] as Map);
+                // Firestore에 응답 및 타이밍 정보 저장 - 비동기 작업이므로 여기에서 직접 호출하지 않고 Future로 감싸기
+                Future.microtask(() {
+                  if (mounted) {
+                    _saveResponseToFirestore();
+                  }
+                });
+              } catch (e) {
+                if (kDebugMode) {
+                  print('응답 타이밍 정보 처리 중 오류: $e');
+                }
+              }
+            }
+          } else {
+            final text = data['text'];
+            if (text != null && text.toString().isNotEmpty) {
+              // '처리 중입니다...' 메시지를 받았을 때 초기화
+              if (_streamResponse == '처리 중입니다...' && text.toString() != '처리 중입니다...') {
+                _streamResponse = text.toString();
+              } else {
+                _streamResponse += text.toString();
+              }
+            }
+          }
+        });
+      }
+    });
+
+    // 응답 시간 리스너 추가
+    socket.on('responseTiming', (data) {
+      // mounted 체크 추가
+      if (!mounted) return;
+
+      if (data is Map) {
+        setState(() {
+          try {
+            _responseTiming = Map<String, dynamic>.from(data as Map);
+          } catch (e) {
+            if (kDebugMode) {
+              print('응답 타이밍 정보 처리 중 오류: $e');
+            }
+          }
+        });
+      }
+    });
+
+    // 오류 수신 리스너
+    socket.on('streamError', (data) {
+      // mounted 체크 추가
+      if (!mounted) return;
+
+      setState(() {
+        _isStreaming = false;
+        _isProcessing = false;
+
+        // 오류 메시지가 있으면 표시
+        if (data is Map && data['message'] != null) {
+          _streamResponse += '\n\n오류: ${data['message']}';
+        } else {
+          _streamResponse += '\n\n알 수 없는 오류가 발생했습니다.';
+        }
+
+        // 오류 발생 시에도 응답 저장 - 비동기 작업이므로 Future로 감싸기
+        Future.microtask(() {
+          if (mounted) {
+            _saveResponseToFirestore();
+          }
+        });
+      });
+    });
+  }
+
+  // Firestore에 응답 및 타이밍 정보를 저장하는 메서드 추가
+  Future<void> _saveResponseToFirestore() async {
+    // mounted 체크 추가
+    if (!mounted) return;
+
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null || _streamResponse.isEmpty) {
+      return;
+    }
+
+    try {
+      final responseData = <String, dynamic>{
+        'userId': user.uid,
+        'question': _questionController.text,
+        'response': _streamResponse,
+        'requestType': _selectedRequestType.value,
+        'timestamp': FieldValue.serverTimestamp(),
+        'hasCustomTemplate': _isPromptTemplatesLoaded,
+      };
+
+      // 응답 시간 정보가 있으면 추가
+      if (_responseTiming != null) {
+        // 맵을 새로 생성하여 복사
+        final timingMap = <String, dynamic>{};
+        _responseTiming!.forEach((key, value) {
+          // 모든 값을 String으로 변환하여 저장
+          if (value != null) {
+            timingMap[key] = value.toString();
+          }
+        });
+        responseData['responseTiming'] = timingMap;
+      }
+
+      // 'user_responses' 컬렉션에 저장
+      await FirebaseFirestore.instance
+          .collection('user_responses')
+          .add(responseData);
+
+      if (kDebugMode && mounted) {
+        print('응답 및 타이밍 데이터가 Firestore에 저장되었습니다');
+      }
+    } catch (e) {
+      if (kDebugMode && mounted) {
+        print('Firestore에 응답 저장 중 오류: $e');
+      }
+    }
   }
 
   Future<void> _startStream() async {
@@ -370,6 +486,7 @@ class _StreamFeedbackPageState extends State<StreamFeedbackPage> {
       _isStreaming = true;
       _isProcessing = true;
       _streamResponse = '';
+      _responseTiming = null; // 응답 시간 정보 초기화
     });
 
     final user = FirebaseAuth.instance.currentUser;
@@ -412,7 +529,7 @@ class _StreamFeedbackPageState extends State<StreamFeedbackPage> {
         }
       }
 
-      // 응답 처리를 위한 리스너 설정 (기존 리스너가 없을 경우에만)
+      // 응답 처리를 위한 리스너 설정
       _setupSocketListeners();
 
       // 스트리밍 요청 전송 (요청 유형 및 커스텀 템플릿 포함)
@@ -426,11 +543,20 @@ class _StreamFeedbackPageState extends State<StreamFeedbackPage> {
 
       // 타임아웃 설정 (60초)
       Future.delayed(const Duration(seconds: 60), () {
+        // mounted 체크 추가
+        if (!mounted) return;
+
         if (_isProcessing) {
           setState(() {
             _isProcessing = false;
             if (_streamResponse.isEmpty) {
               _streamResponse = '응답 시간이 초과되었습니다. 나중에 다시 시도해주세요.';
+              // 타임아웃 시에도 응답 저장
+              Future.microtask(() {
+                if (mounted) {
+                  _saveResponseToFirestore();
+                }
+              });
             }
           });
         }
@@ -446,6 +572,8 @@ class _StreamFeedbackPageState extends State<StreamFeedbackPage> {
         if (_streamResponse.isEmpty) {
           _streamResponse = '오류가 발생했습니다: ${error.toString()}';
         }
+        // 오류 발생 시에도 응답 저장
+        _saveResponseToFirestore();
       });
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Error: ${error.toString()}')),
@@ -467,54 +595,6 @@ class _StreamFeedbackPageState extends State<StreamFeedbackPage> {
       case RequestType.qna:
         return _promptTemplates.qna;
     }
-  }
-
-  // 소켓 리스너 설정 메서드
-  void _setupSocketListeners() {
-    // 기존 리스너 제거
-    socket.off('streamData');
-    socket.off('streamError');
-
-    // 데이터 수신 리스너
-    socket.on('streamData', (data) {
-      if (mounted) {
-        if (data is Map<String, dynamic>) {
-          setState(() {
-            if (data['isDone'] == true) {
-              _isStreaming = false;
-              _isProcessing = false;
-            } else {
-              final text = data['text'];
-              if (text != null && text.toString().isNotEmpty) {
-                // '처리 중입니다...' 메시지를 받았을 때 초기화
-                if (_streamResponse == '처리 중입니다...' && text.toString() != '처리 중입니다...') {
-                  _streamResponse = text.toString();
-                } else {
-                  _streamResponse += text.toString();
-                }
-              }
-            }
-          });
-        }
-      }
-    });
-
-    // 오류 수신 리스너
-    socket.on('streamError', (data) {
-      if (mounted) {
-        setState(() {
-          _isStreaming = false;
-          _isProcessing = false;
-
-          // 오류 메시지가 있으면 표시
-          if (data is Map<String, dynamic> && data['message'] != null) {
-            _streamResponse += '\n\n오류: ${data['message']}';
-          } else {
-            _streamResponse += '\n\n알 수 없는 오류가 발생했습니다.';
-          }
-        });
-      }
-    });
   }
 
   @override
@@ -754,6 +834,25 @@ class _StreamFeedbackPageState extends State<StreamFeedbackPage> {
                           ),
                         ),
                       ),
+
+                      // 응답 시간 정보 표시 위젯 추가
+                      if (_responseTiming != null) ...[
+                        const Divider(),
+                        Text(
+                          '응답 시간 정보',
+                          style: Theme.of(context).textTheme.titleMedium,
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          '총 응답 시간: ${_responseTiming!['totalTimeSeconds']} 초',
+                          style: Theme.of(context).textTheme.bodyMedium,
+                        ),
+                        if (_responseTiming!['timeToFirstResponseSeconds'] != null)
+                          Text(
+                            '첫 응답까지 시간: ${_responseTiming!['timeToFirstResponseSeconds']} 초',
+                            style: Theme.of(context).textTheme.bodyMedium,
+                          ),
+                      ],
                     ],
                   ),
                 ),
@@ -789,16 +888,18 @@ class _StreamFeedbackPageState extends State<StreamFeedbackPage> {
     }
   }
 
-  /*Widget _buildHistoryTab() {
-    return const Center(
-      child: Text('DB에 안 찍을 거지롱 >ㅁ<'),
-    );
-  }*/
-
   @override
   void dispose() {
-    _sseSubscription?.cancel();
+    // 소켓 리스너 정리
+    socket.off('streamData');
+    socket.off('streamError');
+    socket.off('responseTiming');
+
+    // 연결 종료
     socket.disconnect();
+
+    // 기존 리소스 정리
+    _sseSubscription?.cancel();
     _questionController.dispose();
     _codeFeedbackController.dispose();
     _codeGenerationController.dispose();
